@@ -29,34 +29,35 @@ func (f RetrieverFunc) retrieve(key string) ([]byte, error) {
 type Group struct {
 	name      string
 	cache     *cache
+	hotcache  *cache
 	retriever Retriever
 	server    Picker
 	flight    *singleflight.Flight
 }
 
 // NewGroup 创建一个新的缓存空间
-func NewGroup(addr string,name string, maxBytes int64, retriever Retriever) *Group {
+func NewGroup(addr string, name string, maxBytes int64, retriever Retriever) *Group {
 	if retriever == nil {
 		panic("Group retriever must be existed!")
 	}
-	g := &Group{
-		name:      name,
-		cache:     newCache(maxBytes),
-		retriever: retriever,
-		flight:    &singleflight.Flight{},
-	}
-	mu.Lock()
-	groups[name] = g
-	mu.Unlock()
 
 	svr, err := NewServer(addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// 将服务与cache绑定 因为cache和server是解耦合的
-	g.RegisterSvr(svr)
+	g := &Group{
+		name:      name,
+		cache:     newCache(maxBytes),
+		hotcache:  newCache(maxBytes / 10),
+		retriever: retriever,
+		flight:    &singleflight.Flight{},
+		server:    svr, // 将服务与cache绑定 因为cache和server是解耦合的
+	}
 
+	mu.Lock()
+	groups[name] = g
+	mu.Unlock()
 
 	// 启动服务(注册服务至etcd/计算一致性哈希...)
 	go func() {
@@ -67,7 +68,7 @@ func NewGroup(addr string,name string, maxBytes int64, retriever Retriever) *Gro
 		}
 	}()
 
-	time.Sleep(100*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	return g
 }
@@ -97,8 +98,9 @@ func DestroyGroup(name string) {
 	}
 }
 
-// get先看本地缓存，再看远程
+// 先看本地缓存
 func (g *Group) Get(key string) (ByteView, error) {
+	log.Printf("Get " + key)
 
 	if key == "" {
 		return ByteView{}, fmt.Errorf("key required")
@@ -107,19 +109,26 @@ func (g *Group) Get(key string) (ByteView, error) {
 		log.Println("cache hit")
 		return value, nil
 	}
-	log.Println("cache missing, get it another way")
+	if value, ok := g.hotcache.get(key); ok {
+		log.Println("hot cache hit")
+		return value, nil
+	}
+
+	log.Println("local cache missing, get it from remote")
 
 	return g.load(key)
 }
 
-// 从远程
+// 从peer获取
 func (g *Group) load(key string) (ByteView, error) {
 	view, err := g.flight.Fly(key, func() (interface{}, error) {
 		if g.server != nil {
 			if fetcher, ok := g.server.Pick(key); ok {
 				bytes, err := fetcher.Fetch(g.name, key)
 				if err == nil {
-					return ByteView{b: cloneBytes(bytes)}, nil
+					//return ByteView{b: cloneBytes(bytes)}, nil
+					g.hotcache.add(key, ByteView{b: bytes})
+					return ByteView{b: bytes}, nil
 				}
 				log.Printf("fail to get *%s* from peer, %s.\n", key, err.Error())
 			}
@@ -127,7 +136,6 @@ func (g *Group) load(key string) (ByteView, error) {
 			fmt.Print("g.server == nil\n")
 		}
 
-		//如果远端没有。返回数据库
 		return g.getLocally(key)
 	})
 	if err == nil {
@@ -136,8 +144,10 @@ func (g *Group) load(key string) (ByteView, error) {
 	return ByteView{}, err
 }
 
-// getLocally 本地向Retriever取回数据并填充缓存
+// 本地向Retriever取回数据并填充缓存
 func (g *Group) getLocally(key string) (ByteView, error) {
+	log.Printf("Get from retriever")
+
 	bytes, err := g.retriever.retrieve(key)
 	if err != nil {
 		return ByteView{}, err
@@ -145,11 +155,6 @@ func (g *Group) getLocally(key string) (ByteView, error) {
 
 	value := ByteView{b: cloneBytes(bytes)}
 
-	g.populateCache(key, value)
-	return value, nil
-}
-
-// populateCache 提供填充缓存的能力
-func (g *Group) populateCache(key string, value ByteView) {
 	g.cache.add(key, value)
+	return value, nil
 }

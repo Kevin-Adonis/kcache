@@ -122,17 +122,17 @@ func (s *Server) Start() error {
 	pb.RegisterKCacheServer(grpcServer, s)
 
 	s.mu.Unlock()
-
+	//****************
 	// 注册服务至etcd
+	//****************
 	go func() {
-		// Register never return unless stop singnal received
 		err := registry.Register("kcache", s.addr, s.stopSignal)
 		if err != nil {
 			log.Fatalf(err.Error())
 		}
-		// Close channel
+
 		close(s.stopSignal)
-		// Close tcp listen
+
 		err = lis.Close()
 		if err != nil {
 			log.Fatalf(err.Error())
