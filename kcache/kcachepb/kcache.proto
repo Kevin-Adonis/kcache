@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package kcachepb;
+
+option go_package = ".";
+
+message GetRequest {
+  string group = 1;
+  string key = 2;
+}
+
+message GetResponse {
+  bytes value = 1;
+}
+
+service KCache {
+  rpc Get(GetRequest) returns (GetResponse);
+}
+
+//protoc --go_out=. *.proto
+//protoc --go-grpc_out=. *.proto
+
