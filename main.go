@@ -33,30 +33,6 @@ func main() {
 			return nil, fmt.Errorf("%s not exist", key)
 		}))
 
-	/*
-		// New一个服务实例
-		svr, err := kcache.NewServer(addr)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// 将服务与cache绑定 因为cache和server是解耦合的
-		group.RegisterSvr(svr)
-
-		time.Sleep(time.Second)
-
-		// 启动服务(注册服务至etcd/计算一致性哈希...)
-		go func() {
-			// Start将不会return 除非服务stop或者抛出error
-			err = svr.Start()
-			if err != nil {
-				log.Fatal(err)
-			}
-		}()
-
-		time.Sleep(time.Second)
-	*/
-
 	var key string
 	for key != "0" {
 		fmt.Scan(&key)
