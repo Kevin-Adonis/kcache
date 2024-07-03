@@ -13,8 +13,32 @@ message GetResponse {
   bytes value = 1;
 }
 
+message SetRequest {
+  string group = 1;
+  string key = 2;
+  string val = 3;
+  fixed32 nx = 4;
+}
+
+message SetResponse{
+  bytes value = 1;
+}
+
+message DelRequest {
+  string group = 1;
+  string key = 2;
+}
+
+message DelResponse{
+  bytes value = 1;
+}
+
 service KCache {
   rpc Get(GetRequest) returns (GetResponse);
+
+  rpc Set(SetRequest) returns (SetResponse);
+
+  rpc Del(DelRequest) returns (DelResponse);
 }
 
 //protoc --go_out=. *.proto

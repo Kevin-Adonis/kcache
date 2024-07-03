@@ -73,7 +73,7 @@ func (s *Server) Get(ctx context.Context, in *pb.GetRequest) (*pb.GetResponse, e
 	group, key := in.GetGroup(), in.GetKey()
 	resp := &pb.GetResponse{}
 
-	log.Printf("[kcache_svr %s] Recv RPC Request - (%s)/(%s)", s.addr, group, key)
+	log.Printf("[kcache_svr %s] Recv RPC GetRequest - (%s)/(%s)", s.addr, group, key)
 	if key == "" {
 		return resp, fmt.Errorf("key required")
 	}
@@ -90,6 +90,36 @@ func (s *Server) Get(ctx context.Context, in *pb.GetRequest) (*pb.GetResponse, e
 
 	resp.Value = view.ByteSlice()
 	return resp, nil
+}
+
+func (s *Server) Set(ctx context.Context, in *pb.SetRequest) (*pb.SetResponse, error) {
+
+	//这一段是获取请求服务的客户度的信息
+	//pr, _ := peer.FromContext(ctx)
+	//fmt.Print("coming addr: ")
+	//fmt.Println(pr.Addr)
+
+	group, key, val, nx := in.GetGroup(), in.GetKey(), in.GetVal(), in.GetNx()
+	resp := &pb.SetResponse{}
+
+	log.Printf("[kcache_svr %s] Recv RPC SetRequest - (%s)/(%s)", s.addr, group, key)
+	if key == "" || val == "" {
+		return resp, fmt.Errorf("key and val required")
+	}
+
+	g := GetGroup(group)
+	if g == nil {
+		return resp, fmt.Errorf("group not found")
+	}
+
+	err := g.Set(key, val, int(nx))
+	if err != nil {
+		return resp, err
+	}
+
+	resp.Value = []byte{'o', 'k'}
+	return resp, err
+
 }
 
 // Start 启动cache服务
@@ -200,7 +230,7 @@ func (s *Server) UpdatePeers() {
 
 // Pick 根据一致性哈希选举出key应存放在的cache
 // return false 代表从本地获取cache
-func (s *Server) Pick(key string) (Fetcher, bool) {
+func (s *Server) Pick(key string) (Peer, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

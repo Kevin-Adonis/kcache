@@ -1,11 +1,14 @@
 package kcache
 
 import (
+	"context"
 	"fmt"
 	"kcache/kcache/singleflight"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -116,15 +119,15 @@ func (g *Group) Get(key string) (ByteView, error) {
 
 	log.Println("local cache missing, get it from remote")
 
-	return g.load(key)
+	return g.RemoteGet(key)
 }
 
 // 从peer获取
-func (g *Group) load(key string) (ByteView, error) {
+func (g *Group) RemoteGet(key string) (ByteView, error) {
 	view, err := g.flight.Fly(key, func() (interface{}, error) {
 		if g.server != nil {
 			if fetcher, ok := g.server.Pick(key); ok {
-				bytes, err := fetcher.Fetch(g.name, key)
+				bytes, err := fetcher.GetFromPeer(g.name, key)
 				if err == nil {
 					//return ByteView{b: cloneBytes(bytes)}, nil
 					g.hotcache.add(key, ByteView{b: bytes}, time.Time{})
@@ -136,7 +139,7 @@ func (g *Group) load(key string) (ByteView, error) {
 			fmt.Print("g.server == nil\n")
 		}
 
-		return g.getLocally(key)
+		return g.RetrieverGet(key)
 	})
 	if err == nil {
 		return view.(ByteView), err
@@ -145,16 +148,58 @@ func (g *Group) load(key string) (ByteView, error) {
 }
 
 // 本地向Retriever取回数据并填充缓存
-func (g *Group) getLocally(key string) (ByteView, error) {
+func (g *Group) RetrieverGet(key string) (ByteView, error) {
 	log.Printf("Get from retriever")
 
 	bytes, err := g.retriever.retrieve(key)
 	if err != nil {
 		return ByteView{}, err
 	}
-
 	value := ByteView{b: cloneBytes(bytes)}
 
 	g.cache.add(key, value, time.Time{})
 	return value, nil
+}
+
+func (g *Group) Set(key, val string, nx int) error {
+	log.Printf("Set "+key+" "+val+" ", nx)
+
+	return g.RemoteSet(key, val, nx)
+}
+
+// 从peer获取
+func (g *Group) RemoteSet(key, val string, nx int) error {
+	_, err := g.flight.Fly(key, func() (interface{}, error) {
+		if g.server != nil {
+			if fetcher, ok := g.server.Pick(key); ok {
+				err := fetcher.SetFromPeer(g.name, key, val, nx)
+				if err == nil {
+					return nil, err
+				}
+			}
+		} else {
+			fmt.Print("g.server == nil\n")
+		}
+		return nil, g.LocalSet(key, val, nx)
+	})
+	if err == nil {
+		return err
+	}
+	return err
+}
+
+func (g *Group) LocalSet(key, val string, nx int) error {
+	log.Printf("Set myself")
+
+	g.cache.add(key, ByteView{b: []byte(val)}, time.Now().Add(time.Duration(nx)*time.Second))
+
+	cli := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379", // redis地址
+		Password: "",               // 密码
+		DB:       0,                // 使用默认数据库
+	})
+
+	ctx := context.Background()
+	err := cli.Set(ctx, key, val, time.Duration(nx)*time.Second).Err()
+	return err
 }

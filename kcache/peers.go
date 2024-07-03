@@ -4,11 +4,13 @@ package kcache
 
 // Picker 定义了获取分布式节点的能力
 type Picker interface {
-	Pick(key string) (Fetcher, bool)
+	Pick(key string) (Peer, bool)
 }
 
-// Fetcher 定义了从远端获取缓存的能力
+// Peer 定义了从远端获取缓存的能力
 // 所以每个Peer应实现这个接口
-type Fetcher interface {
-	Fetch(group string, key string) ([]byte, error)
+type Peer interface {
+	GetFromPeer(group string, key string) ([]byte, error)
+	SetFromPeer(group string, key, val string, nx int) error
+	DelFromPeer(group string, key string) error
 }

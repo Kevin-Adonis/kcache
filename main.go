@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"kcache/kcache"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 
 	//"time"
 	//"unsafe"
@@ -58,15 +61,34 @@ func main() {
 			return nil, fmt.Errorf("%s not exist", key)
 		}))
 
-	var key string
 	for {
 		fmt.Println("==========================================================================================")
-		fmt.Print("输入Key: ")
-		fmt.Scan(&key)
-		if key == "q" {
+		fmt.Print("> ")
+		reader := bufio.NewReader(os.Stdin)
+		bytes, _, _ := reader.ReadLine()
+		str := string(bytes)
+
+		if str == "q" {
 			break
 		} else {
-			GetTomScore(key, group)
+
+			slice := strings.Split(str, " ")
+			if slice[0] == "get" {
+				GetTomScore(slice[1], group)
+			}
+			if slice[0] == "set" {
+				if len(slice) == 3 {
+					group.Set(slice[1], slice[2], 0)
+				} else if len(slice) == 4 {
+					i, _ := strconv.Atoi(slice[3])
+					group.Set(slice[1], slice[2], i)
+				} else {
+
+				}
+			}
+			if slice[0] == "del" {
+
+			}
 		}
 	}
 }
