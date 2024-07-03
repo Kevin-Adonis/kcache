@@ -24,6 +24,7 @@ type RetrieverFunc func(key string) ([]byte, error)
 
 // RetrieverFunc 通过实现retrieve方法，使得任意匿名函数func
 // 通过被RetrieverFunc(func)类型强制转换后，实现了 Retriever 接口的能力
+
 func (f RetrieverFunc) retrieve(key string) ([]byte, error) {
 	return f(key)
 }
@@ -39,7 +40,7 @@ type Group struct {
 }
 
 // NewGroup 创建一个新的缓存空间
-func NewGroup(addr string, name string, maxBytes int64, retriever Retriever) *Group {
+func NewGroup(addr string, name string, maxBytes int64, retriever RetrieverFunc) *Group {
 	if retriever == nil {
 		panic("Group retriever must be existed!")
 	}

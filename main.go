@@ -35,6 +35,20 @@ func DataBaseInit() {
 	cli.Set(ctx, "Jack", "589", 0)
 }
 
+func GetFromRedis(key string) ([]byte, error) {
+	log.Println("[Redis] search key", key)
+	client := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379", // redis地址
+		Password: "",               // 密码
+		DB:       0,                // 使用默认数据库
+	})
+	ctx := context.Background()
+	if val, err := client.Get(ctx, key).Result(); err == nil {
+		return []byte(val), nil
+	}
+	return nil, fmt.Errorf("%s not exist", key)
+}
+
 func main() {
 
 	DataBaseInit()
@@ -42,24 +56,7 @@ func main() {
 	var addr string = "localhost:" + os.Args[1]
 
 	// 新建cache实例
-	group := kcache.NewGroup(addr, "scores", 2<<10, kcache.RetrieverFunc(
-		//如果所有主机缓存中没有，则从数Redis中取
-		func(key string) ([]byte, error) {
-			log.Println("[Redis] search key", key)
-
-			client := redis.NewClient(&redis.Options{
-				Addr:     "localhost:6379", // redis地址
-				Password: "",               // 密码
-				DB:       0,                // 使用默认数据库
-			})
-
-			ctx := context.Background()
-			if val, err := client.Get(ctx, key).Result(); err == nil {
-				return []byte(val), nil
-			}
-
-			return nil, fmt.Errorf("%s not exist", key)
-		}))
+	group := kcache.NewGroup(addr, "scores", 2<<10, GetFromRedis)
 
 	for {
 		fmt.Println("==========================================================================================")
