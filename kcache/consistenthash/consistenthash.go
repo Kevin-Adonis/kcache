@@ -24,7 +24,7 @@ type Consistency struct {
 	hashmap  map[int]string // hashValue -> peerName
 }
 
-// Register 将各个peer注册到哈希环上
+// Register 将各个peer注册到哈希环上(虚拟节点)
 func (c *Consistency) Register(peersName ...string) {
 	for _, peerName := range peersName {
 		for i := 0; i < c.replicas; i++ {

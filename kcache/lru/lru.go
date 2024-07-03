@@ -8,6 +8,7 @@ package lru
 import (
 	"container/list"
 	"time"
+	//"unsafe"
 )
 
 // Lengthable 接口指明对象可以获取自身占有内存空间大小 以字节为单位
@@ -17,8 +18,8 @@ type Lengthable interface {
 
 // Value 定义双向链表节点所存储的对象
 type Value struct {
-	key   string
-	value Lengthable
+	key    string
+	value  Lengthable
 	expire time.Time
 }
 
@@ -51,19 +52,26 @@ func New(maxBytes int64, callback OnEliminated) *Cache {
 // ok 指明查询结果 false代表查无此key
 func (c *Cache) Get(key string) (value Lengthable, ok bool) {
 	if elem, ok := c.hashmap[key]; ok {
-		c.doublyLinkedList.MoveToFront(elem)
 		entry := elem.Value.(*Value)
+
+		if !entry.expire.IsZero() && entry.expire.Before(time.Now()) {
+			c.RemoveElement(elem)
+			return nil, false
+		}
+
+		c.doublyLinkedList.MoveToFront(elem)
 		return entry.value, true
 	}
 	return
 }
 
-func (c *Cache) Add(key string, value Lengthable) {
-	kvSize := int64(len(key)) + int64(value.Len())
+func (c *Cache) Add(key string, value Lengthable, expire time.Time) {
+	kvSize := int64(len(key)) + int64(value.Len()) + 24 //int64(unsafe.Sizeof(time.Time{}))
 	// cache 容量检查
 	for c.capacity != 0 && c.length+kvSize > c.capacity {
 		c.Remove()
 	}
+
 	if elem, ok := c.hashmap[key]; ok {
 		// 更新缓存key值
 		c.doublyLinkedList.MoveToFront(elem)
@@ -71,9 +79,10 @@ func (c *Cache) Add(key string, value Lengthable) {
 		// 先更新写入字节 再更新
 		c.length += int64(value.Len()) - int64(oldEntry.value.Len())
 		oldEntry.value = value
+		oldEntry.expire = expire
 	} else {
 		// 新增缓存key
-		elem := c.doublyLinkedList.PushFront(&Value{key: key, value: value})
+		elem := c.doublyLinkedList.PushFront(&Value{key: key, value: value, expire: expire})
 		c.hashmap[key] = elem
 		c.length += kvSize
 	}
@@ -85,12 +94,30 @@ func (c *Cache) Remove() {
 	if tailElem != nil {
 		entry := tailElem.Value.(*Value)
 		k, v := entry.key, entry.value
-		delete(c.hashmap, k)                       // 移除映射
-		c.doublyLinkedList.Remove(tailElem)        // 移除缓存
-		c.length -= int64(len(k)) + int64(v.Len()) // 更新占用内存情况
+		delete(c.hashmap, k)                            // 移除映射
+		c.doublyLinkedList.Remove(tailElem)             // 移除缓存
+		c.length -= int64(len(k)) + int64(v.Len()) + 24 // 更新占用内存情况
 		// 移除后的善后处理
 		if c.callback != nil {
 			c.callback(k, v)
 		}
+	}
+}
+
+func (c *Cache) RemoveElement(e *list.Element) {
+	c.doublyLinkedList.Remove(e)
+	entry := e.Value.(*Value)
+	delete(c.hashmap, entry.key)
+	c.length -= int64(len(entry.key)) + int64(entry.value.Len())
+
+	tailElem := c.doublyLinkedList.Back()
+	if tailElem != nil {
+		entry := tailElem.Value.(*Value)
+		k, v := entry.key, entry.value
+		delete(c.hashmap, k)                            // 移除映射
+		c.doublyLinkedList.Remove(tailElem)             // 移除缓存
+		c.length -= int64(len(k)) + int64(v.Len()) + 24 // 更新占用内存情况
+		// 移除后的善后处理
+
 	}
 }

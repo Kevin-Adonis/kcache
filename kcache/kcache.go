@@ -127,7 +127,7 @@ func (g *Group) load(key string) (ByteView, error) {
 				bytes, err := fetcher.Fetch(g.name, key)
 				if err == nil {
 					//return ByteView{b: cloneBytes(bytes)}, nil
-					g.hotcache.add(key, ByteView{b: bytes})
+					g.hotcache.add(key, ByteView{b: bytes}, time.Time{})
 					return ByteView{b: bytes}, nil
 				}
 				log.Printf("fail to get *%s* from peer, %s.\n", key, err.Error())
@@ -155,6 +155,6 @@ func (g *Group) getLocally(key string) (ByteView, error) {
 
 	value := ByteView{b: cloneBytes(bytes)}
 
-	g.cache.add(key, value)
+	g.cache.add(key, value, time.Time{})
 	return value, nil
 }

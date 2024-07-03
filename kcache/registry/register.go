@@ -27,9 +27,6 @@ func etcdAdd(c *clientv3.Client, lid clientv3.LeaseID, service string, addr stri
 	}
 	//return em.AddEndpoint(c.Ctx(), service+"/"+addr, endpoints.Endpoint{Addr: addr})
 	ep := endpoints.Endpoint{Addr: addr}
-	//fmt.Println(ep)
-	fmt.Println("AddEndpoint " + service + "/" + addr)
-	//fmt.Println(em.List(c.Ctx()))
 	return em.AddEndpoint(c.Ctx(), service+"/"+addr, ep, clientv3.WithLease(lid))
 }
 
@@ -62,7 +59,7 @@ func Register(service string, addr string, stop chan error) error {
 		return fmt.Errorf("set keepalive failed: %v", err)
 	}
 
-	log.Printf("[%s] register service ok\n", addr)
+	log.Printf("[%s] register etcd service ok\n", addr)
 
 	for {
 		select {

@@ -142,7 +142,6 @@ func (s *Server) Start() error {
 
 	go s.UpdatePeers()
 
-	//log.Printf("[%s] register service ok\n", s.addr)
 	if err := grpcServer.Serve(lis); s.status && err != nil {
 		return fmt.Errorf("failed to serve: %v", err)
 	}
@@ -160,13 +159,11 @@ func (s *Server) SetPeers(peersAddr ...string) {
 	s.consHash = consistenthash.New(defaultReplicas, nil)
 	s.consHash.Register(peersAddr...)
 	s.clients = make(map[string]*client)
-	for idx, peerAddr := range peersAddr {
+	for _, peerAddr := range peersAddr {
 		if !validPeerAddr(peerAddr) {
 			panic(fmt.Sprintf("[peer %s] invalid address format, it should be x.x.x.x:port", peerAddr))
 		}
 		service := fmt.Sprintf("kcache/%s", peerAddr)
-		fmt.Print(idx)
-		fmt.Println(" " + peerAddr)
 		s.clients[peerAddr] = NewClient(service)
 	}
 }
@@ -191,6 +188,7 @@ func (s *Server) UpdatePeers() {
 					}
 
 					//表示拆开切片
+					log.Println("EndPoint Change Event: ", keys)
 					s.SetPeers(keys...)
 				}
 			}
