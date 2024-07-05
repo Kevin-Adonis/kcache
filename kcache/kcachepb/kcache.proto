@@ -11,13 +11,14 @@ message GetRequest {
 
 message GetResponse {
   bytes value = 1;
+  fixed32 ex = 4;
 }
 
 message SetRequest {
   string group = 1;
   string key = 2;
   string val = 3;
-  fixed32 nx = 4;
+  fixed32 ex = 4;
 }
 
 message SetResponse{

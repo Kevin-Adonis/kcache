@@ -83,12 +83,13 @@ func (s *Server) Get(ctx context.Context, in *pb.GetRequest) (*pb.GetResponse, e
 		return resp, fmt.Errorf("group not found")
 	}
 
-	view, err := g.Get(key)
+	view, ex, err := g.Get(key)
 	if err != nil {
 		return resp, err
 	}
 
 	resp.Value = view.ByteSlice()
+	resp.Ex = uint32(ex)
 	return resp, nil
 }
 
@@ -99,7 +100,7 @@ func (s *Server) Set(ctx context.Context, in *pb.SetRequest) (*pb.SetResponse, e
 	//fmt.Print("coming addr: ")
 	//fmt.Println(pr.Addr)
 
-	group, key, val, nx := in.GetGroup(), in.GetKey(), in.GetVal(), in.GetNx()
+	group, key, val, nx := in.GetGroup(), in.GetKey(), in.GetVal(), in.GetEx()
 	resp := &pb.SetResponse{}
 
 	log.Printf("[kcache_svr %s] Recv RPC SetRequest - (%s)/(%s)", s.addr, group, key)

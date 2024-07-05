@@ -35,7 +35,7 @@ func DataBaseInit() {
 	cli.Set(ctx, "Jack", "589", 0)
 }
 
-func GetFromRedis(key string) ([]byte, error) {
+func GetFromRedis(key string) ([]byte, int, error) {
 	log.Println("[Redis] search key", key)
 	client := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379", // redis地址
@@ -44,19 +44,20 @@ func GetFromRedis(key string) ([]byte, error) {
 	})
 	ctx := context.Background()
 	if val, err := client.Get(ctx, key).Result(); err == nil {
-		return []byte(val), nil
+		if ttl, err := client.TTL(ctx, key).Result(); err == nil {
+			return []byte(val), int(ttl.Seconds()), nil
+		}
 	}
-	return nil, fmt.Errorf("%s not exist", key)
+	return nil, -1, fmt.Errorf("%s not exist", key)
 }
 
 func main() {
-
 	DataBaseInit()
 
 	var addr string = "localhost:" + os.Args[1]
 
 	// 新建cache实例
-	group := kcache.NewGroup(addr, "scores", 2<<10, GetFromRedis)
+	group := kcache.NewGroup(addr, "scores", 2<<10, GetFromRedis, nil, nil)
 
 	for {
 		fmt.Println("==========================================================================================")
@@ -92,11 +93,13 @@ func main() {
 
 func GetTomScore(key string, group *kcache.Group) {
 
-	view, err := group.Get(key)
+	view, ex, err := group.Get(key)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	fmt.Print("Value: ")
-	fmt.Println(view.String())
+	fmt.Print(view.String())
+	fmt.Print(" Ex: ")
+	fmt.Println(ex)
 }

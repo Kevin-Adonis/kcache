@@ -47,11 +47,11 @@ func (c *client) GetgrpcConn() (*grpc.ClientConn, error) {
 }
 
 // GetFromPeer 从remote peer获取对应缓存值
-func (c *client) GetFromPeer(group string, key string) ([]byte, error) {
+func (c *client) GetFromPeer(group string, key string) ([]byte,int,error) {
 
 	conn, err := c.GetgrpcConn()
 	if err != nil {
-		return nil, err
+		return nil, -1 ,err
 	}
 	defer conn.Close()
 
@@ -65,10 +65,10 @@ func (c *client) GetFromPeer(group string, key string) ([]byte, error) {
 		Key:   key,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("could not get %s/%s from peer %s", group, key, c.name)
+		return nil, -1,fmt.Errorf("could not get %s/%s from peer %s", group, key, c.name)
 	}
 
-	return resp.GetValue(), nil
+	return resp.GetValue(), int(resp.GetEx()), nil
 }
 
 func (c *client) SetFromPeer(group string, key, val string, nx int) error {
@@ -88,7 +88,7 @@ func (c *client) SetFromPeer(group string, key, val string, nx int) error {
 		Group: group,
 		Key:   key,
 		Val:   val,
-		Nx:    uint32(nx),
+		Ex:    uint32(nx),
 	})
 	if err1 != nil {
 		return fmt.Errorf("could not get %s/%s from peer %s", group, key, c.name)

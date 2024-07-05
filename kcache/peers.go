@@ -10,7 +10,7 @@ type Picker interface {
 // Peer 定义了从远端获取缓存的能力
 // 所以每个Peer应实现这个接口
 type Peer interface {
-	GetFromPeer(group string, key string) ([]byte, error)
+	GetFromPeer(group string, key string) ([]byte, int, error)
 	SetFromPeer(group string, key, val string, nx int) error
 	DelFromPeer(group string, key string) error
 }

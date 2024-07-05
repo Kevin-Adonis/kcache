@@ -7,6 +7,7 @@ package lru
 
 import (
 	"container/list"
+	"log"
 	"time"
 	//"unsafe"
 )
@@ -31,7 +32,7 @@ type OnEliminated func(key string, value Lengthable)
 type Cache struct {
 	capacity         int64 // Cache 最大容量(Byte)
 	length           int64 // Cache 当前容量(Byte)
-	hashmap          map[string]*list.Element
+	Hashmap          map[string]*list.Element
 	doublyLinkedList *list.List // 链头表示最近使用
 
 	callback OnEliminated
@@ -42,25 +43,41 @@ type Cache struct {
 func New(maxBytes int64, callback OnEliminated) *Cache {
 	return &Cache{
 		capacity:         maxBytes,
-		hashmap:          make(map[string]*list.Element),
+		Hashmap:          make(map[string]*list.Element),
 		doublyLinkedList: list.New(),
 		callback:         callback,
 	}
 }
 
+func (c *Cache) IsEx(key string) bool {
+	if elem, ok := c.Hashmap[key]; ok {
+		entry := elem.Value.(*Value)
+		if !entry.expire.IsZero() && entry.expire.Before(time.Now()) {
+			return true
+		}
+
+	}
+	return false
+}
+
 // Get 从缓存获取对应key的value。
 // ok 指明查询结果 false代表查无此key
-func (c *Cache) Get(key string) (value Lengthable, ok bool) {
-	if elem, ok := c.hashmap[key]; ok {
+func (c *Cache) Get(key string) (value Lengthable, ex int, ok bool) {
+	if elem, ok := c.Hashmap[key]; ok {
 		entry := elem.Value.(*Value)
 
 		if !entry.expire.IsZero() && entry.expire.Before(time.Now()) {
 			c.RemoveElement(elem)
-			return nil, false
+			log.Println(key + " is expired")
+			return nil, -1, false
 		}
 
 		c.doublyLinkedList.MoveToFront(elem)
-		return entry.value, true
+		if entry.expire.IsZero() {
+			return entry.value, 0, true
+		}
+
+		return entry.value, (int(entry.expire.Sub(time.Now()).Seconds())), true
 	}
 	return
 }
@@ -72,7 +89,7 @@ func (c *Cache) Add(key string, value Lengthable, expire time.Time) {
 		c.Remove()
 	}
 
-	if elem, ok := c.hashmap[key]; ok {
+	if elem, ok := c.Hashmap[key]; ok {
 		// 更新缓存key值
 		c.doublyLinkedList.MoveToFront(elem)
 		oldEntry := elem.Value.(*Value)
@@ -83,9 +100,10 @@ func (c *Cache) Add(key string, value Lengthable, expire time.Time) {
 	} else {
 		// 新增缓存key
 		elem := c.doublyLinkedList.PushFront(&Value{key: key, value: value, expire: expire})
-		c.hashmap[key] = elem
+		c.Hashmap[key] = elem
 		c.length += kvSize
 	}
+
 }
 
 // Remove 淘汰一枚最近最不常用缓存
@@ -94,7 +112,7 @@ func (c *Cache) Remove() {
 	if tailElem != nil {
 		entry := tailElem.Value.(*Value)
 		k, v := entry.key, entry.value
-		delete(c.hashmap, k)                            // 移除映射
+		delete(c.Hashmap, k)                            // 移除映射
 		c.doublyLinkedList.Remove(tailElem)             // 移除缓存
 		c.length -= int64(len(k)) + int64(v.Len()) + 24 // 更新占用内存情况
 		// 移除后的善后处理
@@ -107,17 +125,6 @@ func (c *Cache) Remove() {
 func (c *Cache) RemoveElement(e *list.Element) {
 	c.doublyLinkedList.Remove(e)
 	entry := e.Value.(*Value)
-	delete(c.hashmap, entry.key)
+	delete(c.Hashmap, entry.key)
 	c.length -= int64(len(entry.key)) + int64(entry.value.Len())
-
-	tailElem := c.doublyLinkedList.Back()
-	if tailElem != nil {
-		entry := tailElem.Value.(*Value)
-		k, v := entry.key, entry.value
-		delete(c.hashmap, k)                            // 移除映射
-		c.doublyLinkedList.Remove(tailElem)             // 移除缓存
-		c.length -= int64(len(k)) + int64(v.Len()) + 24 // 更新占用内存情况
-		// 移除后的善后处理
-
-	}
 }

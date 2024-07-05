@@ -16,32 +16,60 @@ var (
 	groups = make(map[string]*Group)
 )
 
-type Retriever interface {
-	retrieve(string) ([]byte, error)
+type GetHandler interface {
+	handle(string) ([]byte, int, error)
 }
 
-type RetrieverFunc func(key string) ([]byte, error)
+type GetHandlerFunc func(key string) ([]byte, int, error)
 
-// RetrieverFunc 通过实现retrieve方法，使得任意匿名函数func
+// RetrieverFunc 通过实现handle方法，使得任意匿名函数func
 // 通过被RetrieverFunc(func)类型强制转换后，实现了 Retriever 接口的能力
+func (f GetHandlerFunc) handle(key string) ([]byte, int, error) {
+	return f(key)
+}
 
-func (f RetrieverFunc) retrieve(key string) ([]byte, error) {
+type SetHandler interface {
+	handle(string, string, int) error
+}
+
+type SetHandlerFunc func(string, string, int) error
+
+// RetrieverFunc 通过实现handle方法，使得任意匿名函数func
+// 通过被RetrieverFunc(func)类型强制转换后，实现了 Retriever 接口的能力
+func (f SetHandlerFunc) handle(key, val string, ex int) error {
+	return f(key, val, ex)
+}
+
+type DelHandler interface {
+	handle(string) error
+}
+
+type DelHandlerFunc func(string) error
+
+// RetrieverFunc 通过实现handle方法，使得任意匿名函数func
+// 通过被RetrieverFunc(func)类型强制转换后，实现了 Retriever 接口的能力
+func (f DelHandlerFunc) handle(key string) error {
 	return f(key)
 }
 
 // Group 提供命名管理缓存/填充缓存的能力
 type Group struct {
-	name      string
-	cache     *cache
-	hotcache  *cache
-	retriever Retriever
-	server    Picker
-	flight    *singleflight.Flight
+	name       string
+	cache      *cache
+	hotcache   *cache
+	server     Picker
+	flight     *singleflight.Flight
+	usergetter GetHandler
+	usersetter SetHandler
+	userdeller DelHandler
 }
 
 // NewGroup 创建一个新的缓存空间
-func NewGroup(addr string, name string, maxBytes int64, retriever RetrieverFunc) *Group {
-	if retriever == nil {
+func NewGroup(addr string, name string, maxBytes int64,
+	usergetter GetHandlerFunc,
+	usersetter SetHandlerFunc,
+	userdeller DelHandlerFunc) *Group {
+	if usergetter == nil {
 		panic("Group retriever must be existed!")
 	}
 
@@ -51,12 +79,14 @@ func NewGroup(addr string, name string, maxBytes int64, retriever RetrieverFunc)
 	}
 
 	g := &Group{
-		name:      name,
-		cache:     newCache(maxBytes),
-		hotcache:  newCache(maxBytes / 10),
-		retriever: retriever,
-		flight:    &singleflight.Flight{},
-		server:    svr, // 将服务与cache绑定 因为cache和server是解耦合的
+		name:       name,
+		cache:      newCache(maxBytes),
+		hotcache:   newCache(maxBytes / 10),
+		flight:     &singleflight.Flight{},
+		server:     svr, // 将服务与cache绑定 因为cache和server是解耦合的
+		usergetter: usergetter,
+		usersetter: usersetter,
+		userdeller: userdeller,
 	}
 
 	mu.Lock()
@@ -71,6 +101,8 @@ func NewGroup(addr string, name string, maxBytes int64, retriever RetrieverFunc)
 			log.Fatal(err)
 		}
 	}()
+
+	go g.cache.CheckEx()
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -103,19 +135,19 @@ func DestroyGroup(name string) {
 }
 
 // 先看本地缓存
-func (g *Group) Get(key string) (ByteView, error) {
+func (g *Group) Get(key string) (ByteView, int, error) {
 	log.Printf("Get " + key)
 
 	if key == "" {
-		return ByteView{}, fmt.Errorf("key required")
+		return ByteView{}, -1, fmt.Errorf("key required")
 	}
-	if value, ok := g.cache.get(key); ok {
+	if value, ex, ok := g.cache.get(key); ok {
 		log.Println("cache hit")
-		return value, nil
+		return value, ex, nil
 	}
-	if value, ok := g.hotcache.get(key); ok {
+	if value, ex, ok := g.hotcache.get(key); ok {
 		log.Println("hot cache hit")
-		return value, nil
+		return value, ex, nil
 	}
 
 	log.Println("local cache missing, get it from remote")
@@ -124,15 +156,19 @@ func (g *Group) Get(key string) (ByteView, error) {
 }
 
 // 从peer获取
-func (g *Group) RemoteGet(key string) (ByteView, error) {
-	view, err := g.flight.Fly(key, func() (interface{}, error) {
+func (g *Group) RemoteGet(key string) (ByteView, int, error) {
+	view, ex, err := g.flight.Fly(key, func() (interface{}, int, error) {
 		if g.server != nil {
 			if fetcher, ok := g.server.Pick(key); ok {
-				bytes, err := fetcher.GetFromPeer(g.name, key)
+				bytes, ex, err := fetcher.GetFromPeer(g.name, key)
 				if err == nil {
 					//return ByteView{b: cloneBytes(bytes)}, nil
-					g.hotcache.add(key, ByteView{b: bytes}, time.Time{})
-					return ByteView{b: bytes}, nil
+					if ex == 0 {
+						g.hotcache.add(key, ByteView{b: bytes}, time.Time{})
+						return ByteView{b: bytes}, 0, nil
+					}
+					g.hotcache.add(key, ByteView{b: bytes}, time.Now().Add(time.Duration(ex)*time.Second))
+					return ByteView{b: bytes}, ex, nil
 				}
 				log.Printf("fail to get *%s* from peer, %s.\n", key, err.Error())
 			}
@@ -140,26 +176,31 @@ func (g *Group) RemoteGet(key string) (ByteView, error) {
 			fmt.Print("g.server == nil\n")
 		}
 
-		return g.RetrieverGet(key)
+		return g.LocalGet(key)
 	})
 	if err == nil {
-		return view.(ByteView), err
+		return view.(ByteView), ex, err
 	}
-	return ByteView{}, err
+	return ByteView{}, -1, err
 }
 
 // 本地向Retriever取回数据并填充缓存
-func (g *Group) RetrieverGet(key string) (ByteView, error) {
+func (g *Group) LocalGet(key string) (ByteView, int, error) {
 	log.Printf("Get from retriever")
 
-	bytes, err := g.retriever.retrieve(key)
+	bytes, ex, err := g.usergetter.handle(key)
 	if err != nil {
-		return ByteView{}, err
+		return ByteView{}, -1, err
 	}
 	value := ByteView{b: cloneBytes(bytes)}
 
-	g.cache.add(key, value, time.Time{})
-	return value, nil
+	if ex == 0 {
+		g.cache.add(key, value, time.Time{})
+		return value, 0, nil
+	}
+
+	g.cache.add(key, value, time.Now().Add(time.Duration(ex)*time.Second))
+	return value, ex, nil
 }
 
 func (g *Group) Set(key, val string, nx int) error {
@@ -170,18 +211,18 @@ func (g *Group) Set(key, val string, nx int) error {
 
 // 从peer获取
 func (g *Group) RemoteSet(key, val string, nx int) error {
-	_, err := g.flight.Fly(key, func() (interface{}, error) {
+	err := g.flight.SetFly(key, func() error {
 		if g.server != nil {
 			if fetcher, ok := g.server.Pick(key); ok {
 				err := fetcher.SetFromPeer(g.name, key, val, nx)
 				if err == nil {
-					return nil, err
+					return err
 				}
 			}
 		} else {
 			fmt.Print("g.server == nil\n")
 		}
-		return nil, g.LocalSet(key, val, nx)
+		return g.LocalSet(key, val, nx)
 	})
 	if err == nil {
 		return err
@@ -190,17 +231,22 @@ func (g *Group) RemoteSet(key, val string, nx int) error {
 }
 
 func (g *Group) LocalSet(key, val string, nx int) error {
-	log.Printf("Set myself")
-
-	g.cache.add(key, ByteView{b: []byte(val)}, time.Now().Add(time.Duration(nx)*time.Second))
+	log.Printf("LocalSet")
 
 	cli := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379", // redis地址
 		Password: "",               // 密码
 		DB:       0,                // 使用默认数据库
 	})
-
 	ctx := context.Background()
+
+	if nx == 0 {
+		g.cache.add(key, ByteView{b: []byte(val)}, time.Time{})
+		err := cli.Set(ctx, key, val, 0).Err()
+		return err
+	}
+
+	g.cache.add(key, ByteView{b: []byte(val)}, time.Now().Add(time.Duration(nx)*time.Second))
 	err := cli.Set(ctx, key, val, time.Duration(nx)*time.Second).Err()
 	return err
 }
